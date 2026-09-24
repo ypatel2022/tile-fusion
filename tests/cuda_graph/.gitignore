@@ -1,0 +1,4 @@
+/gemm_dag
+/gemm-dag-*.out
+/perf-*.out
+/perf-*.csv
