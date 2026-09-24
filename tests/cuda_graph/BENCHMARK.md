@@ -20,46 +20,22 @@ of permitting independent GEMMs to overlap. The GPU may still serialize branches
 a speedup is not guaranteed. All three modes compute the same 30 matrix products.
 This benchmarks the teaching kernel; it is not a comparison with optimized GEMM.
 
-## Run on Fir
-
-From the repository root:
-
-```bash
-sbatch tests/cuda_graph/perf.sbatch
-```
-
-The batch script requests one H100, one CPU, 2 GB RAM, and ten minutes, then builds
-and runs the benchmark. Output files are:
-
-- `tests/cuda_graph/perf-<job-id>.out`: build log, device/version information,
-  correctness failures, and a short timing/speedup summary.
-- `tests/cuda_graph/perf-<job-id>.csv`: one header and three implementation rows,
-  with individual trial times, correctness flags, and median results.
+## Benchmark parameters
 
 Optional positional arguments are **matrix size, replays per trial, number of
 trials, warmup replays per trial**, in that order:
 
-```bash
-sbatch tests/cuda_graph/perf.sbatch 64 100 7 10
-sbatch tests/cuda_graph/perf.sbatch 256 100 7 10
+```text
+gemm_dag_benchmark [n=64 [replays=100 [trials=7 [warmup=10]]]]
 ```
 
 Defaults are `64 100 7 10`. Sizes from 1 to 1024 are accepted, including sizes
 not divisible by 16. All counts must be positive. CPU reference work scales as
-30 times the cube of the matrix size, so larger sizes can need more job time.
+30 times the cube of the matrix size, so larger sizes take longer to validate.
 
-For an existing GPU allocation, build from the repository root:
-
-```bash
-module load StdEnv/2023 cuda/12.6 cmake/3.27.7
-cmake -S tests/cuda_graph -B tests/cuda_graph/build -DCMAKE_BUILD_TYPE=Release
-cmake --build tests/cuda_graph/build --parallel 1
-srun tests/cuda_graph/build/gemm_dag_benchmark 64 100 7 10 > tests/cuda_graph/perf-manual.csv
-```
-
-The default architecture is `sm_90`; CMake accepts
-`-DCMAKE_CUDA_ARCHITECTURES=...` for a different GPU. No sparse matrices, MKL,
-METIS, PAPI, or external downloads are required for this standalone build.
+CSV goes to standard output: one header and three implementation rows, with
+individual trial times, correctness flags, and median results. Device/version
+information, correctness failures, and timing summaries go to standard error.
 
 ## How timing works
 
@@ -85,7 +61,7 @@ CPU submits work; it is not the sum of isolated kernel runtimes. Host wall time
 includes submission, completion waiting, and the event calls, amortized over the
 batch. These are steady-state batch averages, not single-request latency. Inputs
 and buffers are reused, so caches are warm. Modes run in the table's order; repeat
-jobs to assess noise from clocks or other activity before drawing conclusions.
+runs to assess noise from clocks or other activity before drawing conclusions.
 
 ## Reading the CSV
 

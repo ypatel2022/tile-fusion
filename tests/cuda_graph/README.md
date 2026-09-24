@@ -82,42 +82,6 @@ Each node writes its own output buffer. Passing that buffer to a later node does
 **not** tell CUDA about the dependency: the `{g1}`, `{g1, g2}`, and `{g3, g4}`
 arguments explicitly provide the ordering.
 
-## Build and run on Fir
-
-From the repository root, load CUDA and compile:
-
-```bash
-module load StdEnv/2023 cuda/12.6
-nvcc -std=c++17 -O2 -arch=sm_90 tests/cuda_graph/gemm_dag.cu -o tests/cuda_graph/gemm_dag
-```
-
-`sm_90` targets Hopper GPUs. Compilation can happen on the login node, but run
-the executable inside a GPU allocation. For example:
-
-```bash
-salloc --gpus=h100:1 --cpus-per-task=1 --mem=2G --time=00:05:00
-srun ./tests/cuda_graph/gemm_dag
-exit  # Release the interactive allocation when finished.
-```
-
-If you already have a GPU allocation, just run the `srun` command there. A
-successful run prints `PASS` for G1 through G30 and exits with status 0; a CUDA
-error or a failed comparison exits with a nonzero status.
-
-### Submit a batch job
-
-From the repository root, submit the included script:
-
-```bash
-sbatch tests/cuda_graph/run.sbatch
-```
-
-The script requests one H100 GPU (`--gpus=h100:1`), one CPU, 2 GB of host memory,
-and five minutes. Fir requires an explicit GPU type in GPU requests.
-It loads CUDA, compiles into the job's temporary directory (`SLURM_TMPDIR`),
-and runs the correctness check once. Both standard output and errors go to
-`tests/cuda_graph/gemm-dag-<job-id>.out`. Look for `PASS` for G1 through G30.
-
 ## Reading the code
 
 1. `gemm`: one GPU thread computes one output element using a dot product.
