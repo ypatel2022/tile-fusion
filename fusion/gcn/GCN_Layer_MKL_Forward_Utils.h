@@ -228,9 +228,6 @@ void forwardForOneLayerFusedParallelSeparatedVectorizedSP(
       for (int j1 = LevelPtr[i1]; j1 < LevelPtr[i1 + 1]; j1++) {
         int kBeginL1 = ParPtr[j1];
         int kEndL1 = MixPtr[j1 * numKernels];
-        // The inspector may append an empty tile when every row is fused.
-        // Do not read Partition past its end or launch a zero-work GEMM.
-        if (kBeginL1 == MixPtr[j1 * numKernels + 1]) continue;
         int iL1 = Partition[kBeginL1];
         int tileSize = kEndL1 - kBeginL1;
         cblas_sgemm(
