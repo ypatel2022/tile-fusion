@@ -1,4 +1,5 @@
 #include "sparse-fusion/Cuda_SpMM_SpMM.h"
+#include "sparse-fusion/SpMM_SpMM.h"
 
 #include <cuda_runtime.h>
 
@@ -77,20 +78,17 @@ struct DeviceData {
 
 std::vector<double> reference(const Csr &a, const Csr &b,
                               const std::vector<float> &x, int width) {
+  const std::vector<double> a_values(a.values.begin(), a.values.end());
+  const std::vector<double> b_values(b.values.begin(), b.values.end());
+  const std::vector<double> input(x.begin(), x.end());
   std::vector<double> intermediate(static_cast<size_t>(b.rows) * width, 0.0);
   std::vector<double> y(static_cast<size_t>(a.rows) * width, 0.0);
-  for (int row = 0; row < b.rows; ++row)
-    for (int p = b.offsets[row]; p < b.offsets[row + 1]; ++p)
-      for (int column = 0; column < width; ++column)
-        intermediate[static_cast<size_t>(row) * width + column] +=
-            static_cast<double>(b.values[p]) *
-            x[static_cast<size_t>(b.indices[p]) * width + column];
-  for (int row = 0; row < a.rows; ++row)
-    for (int p = a.offsets[row]; p < a.offsets[row + 1]; ++p)
-      for (int column = 0; column < width; ++column)
-        y[static_cast<size_t>(row) * width + column] +=
-            static_cast<double>(a.values[p]) *
-            intermediate[static_cast<size_t>(a.indices[p]) * width + column];
+  swiftware::sparse::spmmCsrSequential(
+      b.rows, width, b.columns, b.offsets.data(), b.indices.data(),
+      b_values.data(), input.data(), intermediate.data());
+  swiftware::sparse::spmmCsrSequential(
+      a.rows, width, a.columns, a.offsets.data(), a.indices.data(),
+      a_values.data(), intermediate.data(), y.data());
   return y;
 }
 
