@@ -1,6 +1,8 @@
 //
 // Created by kazem on 02/05/23.
 //
+#include "sparse-fusion/SpMM_SpMM.h"
+
 #ifdef PROF_WITH_PAPI
 #include "papi_wrapper.h"
 #else
@@ -16,19 +18,6 @@
 namespace swiftware {
 namespace sparse {
 
-/// C = A*B, where A is sparse CSR MxK and B (K x N) and C (MxN) are Dense
-template <class T> void spmmCsrSequential(int M, int N, int K, const int *Ap, const int *Ai,
-                       const T *Ax, const T *Bx, T *Cx) {
-  for (int i = 0; i < M; ++i) {
-    for (int j = Ap[i]; j < Ap[i + 1]; ++j) {
-      int aij = Ai[j] * N;
-      for (int k = 0; k < N; ++k) {
-        assert(i * N + k < M * N);
-        Cx[i * N + k] += Ax[j] * Bx[aij + k];
-      }
-    }
-  }
-}
 template void spmmCsrSequential<float>(int M, int N, int K, const int *Ap, const int *Ai,
                        const float *Ax, const float *Bx, float *Cx);
 template void spmmCsrSequential<double>(int M, int N, int K, const int *Ap, const int *Ai,

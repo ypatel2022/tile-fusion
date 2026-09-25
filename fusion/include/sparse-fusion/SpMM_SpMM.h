@@ -5,6 +5,8 @@
 #ifndef SPARSE_FUSION_SPMM_SPMM_H
 #define SPARSE_FUSION_SPMM_SPMM_H
 
+#include <cassert>
+
 namespace swiftware {
 namespace sparse {
 
@@ -17,9 +19,21 @@ namespace sparse {
 /// \param Ax : values
 /// \param Bx : values
 /// \param Cx : values
+/// Accumulates into Cx; initialize it to zero to compute A*B.
 template<class T> void spmmCsrSequential(int M, int N, int K,
                        const int *Ap, const int *Ai, const T *Ax,
-                       const T *Bx, T *Cx);
+                       const T *Bx, T *Cx) {
+  for (int i = 0; i < M; ++i) {
+    for (int j = Ap[i]; j < Ap[i + 1]; ++j) {
+      int aij = Ai[j] * N;
+      for (int k = 0; k < N; ++k) {
+        assert(i * N + k < M * N);
+        Cx[i * N + k] += Ax[j] * Bx[aij + k];
+      }
+    }
+  }
+}
+
 template<class T> void spmmCsrParallel(int M, int N, int K,
                      const int *Ap, const int *Ai, const T *Ax,
                      const T *Bx, T *Cx, int NThreads);
