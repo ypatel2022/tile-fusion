@@ -1,23 +1,42 @@
 
-project(cuda-spmm-impl LANGUAGES  C CXX)
+cmake_minimum_required(VERSION 3.20)
 
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CUDA_STANDARD 14)
-
-set(CMAKE_CUDA_STANDARD_REQUIRED TRUE)
-set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-set(CMAKE_CUDA_ARCHITECTURES 50 61 75 80 86)
-#set(CMAKE_CUDA_ARCHITECTURES 50 75)
-# TODO: after you had cmake 3.24, you can use the below line so no need to enter the version
-#set_property(TARGET tgt PROPERTY CUDA_ARCHITECTURES native)
-
-if (CUDA_FOUND AND CUDAToolkit_FOUND)
-    message(STATUS "CUDA found: ${CUDA_VERSION}")
-    enable_language(CUDA)
-
+# The graph library can be built on its own, without the CPU research demos'
+# MKL/METIS dependencies. The main fusion build retains those demos by default.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(cuda_tile_fusion LANGUAGES CXX CUDA)
+    set(legacy_cuda_demos_default OFF)
+    include(CTest)
 else()
-    message(STATUS "CUDA not found, proceeding without CUDA support")
-    # Set the project languages to only CXX if CUDA is not found
+    enable_language(CUDA)
+    set(legacy_cuda_demos_default ON)
+endif()
+find_package(CUDAToolkit REQUIRED)
+
+add_library(cuda_tile_fusion SpMM_SpMM_Graph.cu)
+add_library(swiftware::cuda_tile_fusion ALIAS cuda_tile_fusion)
+target_include_directories(cuda_tile_fusion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_link_libraries(cuda_tile_fusion PUBLIC CUDA::cudart)
+target_compile_features(cuda_tile_fusion PUBLIC cxx_std_14)
+set_target_properties(cuda_tile_fusion PROPERTIES
+    CUDA_STANDARD 14 CUDA_STANDARD_REQUIRED ON)
+
+add_executable(spmm_spmm_graph_demo demo/SpMMSpMMGraphDemo.cu)
+target_link_libraries(spmm_spmm_graph_demo PRIVATE swiftware::cuda_tile_fusion)
+set_target_properties(spmm_spmm_graph_demo PROPERTIES
+    CUDA_STANDARD 14 CUDA_STANDARD_REQUIRED ON)
+if(BUILD_TESTING)
+    add_test(NAME cuda_spmm_spmm_graph COMMAND spmm_spmm_graph_demo)
+endif()
+
+option(TILE_FUSION_BUILD_LEGACY_CUDA_DEMOS
+    "Build the original CUDA demos with the main fusion project"
+    ${legacy_cuda_demos_default})
+if(NOT TILE_FUSION_BUILD_LEGACY_CUDA_DEMOS)
+    return()
+endif()
+if(NOT TARGET fusion)
+    message(FATAL_ERROR "Legacy CUDA demos require configuring the fusion project")
 endif()
 
 add_executable(spmm_demo_gpu
