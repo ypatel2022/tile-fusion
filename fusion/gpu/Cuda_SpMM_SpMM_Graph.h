@@ -3,21 +3,11 @@
 
 #include "Cuda_SpMM_SpMM_Demo_Utils.h"
 
-#include <stdexcept>
-#include <string>
-
 // Replays the existing fused/deferred kernel pair with fixed buffers and schedule.
 class FusedSpMMSpMMSeqReduceRowBalanceGraph
     : public FusedSpMMSpMMSeqReduceRowBalance {
   cudaGraph_t Graph = nullptr;
   cudaGraphExec_t GraphExec = nullptr;
-
-  static void checkCuda(cudaError_t Status, const char *Operation) {
-    if (Status != cudaSuccess) {
-      throw std::runtime_error(std::string(Operation) + ": " +
-                               cudaGetErrorString(Status));
-    }
-  }
 
 protected:
   Timer analysis() override {
@@ -25,7 +15,7 @@ protected:
     t.start();
     FusedSpMMSpMMSeqReduceRowBalance::analysis();
 
-    checkCuda(cudaGraphCreate(&Graph, 0), "cudaGraphCreate");
+    cudaGraphCreate(&Graph, 0);
     dim3 blockDim(NBlockDim, MBlockDim, 1);
 
     void *fusedArgs[] = {
@@ -40,8 +30,7 @@ protected:
     fusedParams.blockDim = blockDim;
     fusedParams.kernelParams = fusedArgs;
     cudaGraphNode_t fusedNode;
-    checkCuda(cudaGraphAddKernelNode(&fusedNode, Graph, nullptr, 0, &fusedParams),
-              "cudaGraphAddKernelNode (fused)");
+    cudaGraphAddKernelNode(&fusedNode, Graph, nullptr, 0, &fusedParams);
 
     void *deferredArgs[] = {
         &UFDim,            &InTensor->N,        &InTensor->K,
@@ -56,11 +45,8 @@ protected:
     deferredParams.kernelParams = deferredArgs;
     cudaGraphNode_t deferredNode;
     // All intermediate rows must be ready before the deferred consumers run.
-    checkCuda(cudaGraphAddKernelNode(&deferredNode, Graph, &fusedNode, 1,
-                                    &deferredParams),
-              "cudaGraphAddKernelNode (deferred)");
-    checkCuda(cudaGraphInstantiate(&GraphExec, Graph, nullptr, nullptr, 0),
-              "cudaGraphInstantiate");
+    cudaGraphAddKernelNode(&deferredNode, Graph, &fusedNode, 1, &deferredParams);
+    cudaGraphInstantiate(&GraphExec, Graph, nullptr, nullptr, 0);
     t.stop("FusedSpMMSpMMGraphAnalysis");
     return t;
   }
@@ -68,8 +54,8 @@ protected:
   Timer execute() override {
     Timer t;
     t.startGPU();
-    checkCuda(cudaGraphLaunch(GraphExec, 0), "cudaGraphLaunch");
-    checkCuda(cudaStreamSynchronize(0), "cudaStreamSynchronize");
+    cudaGraphLaunch(GraphExec, 0);
+    cudaStreamSynchronize(0);
     t.stopGPU("FusedSpMMSpMMGraph");
     OutTensor->copyDeviceToHost();
     return t;
