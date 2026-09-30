@@ -13,6 +13,21 @@ namespace {
 
 constexpr int ThreadsPerBlock = 128;
 
+class FusedDirect : public FusedSpMMSpMMSeqReduceRowBalance {
+protected:
+  Timer analysis() override {
+    auto t = FusedSpMMSpMMSeqReduceRowBalance::analysis();
+    // Keep a valid second launch at 100% fusion, matching the graph's no-op node.
+    if (UFMGridDim == 0) {
+      UFMGridDim = 1;
+    }
+    return t;
+  }
+
+public:
+  using FusedSpMMSpMMSeqReduceRowBalance::FusedSpMMSpMMSeqReduceRowBalance;
+};
+
 // This control removes the original implementation's wait between kernels.
 // Both launches use the same stream, which already preserves their dependency.
 class FusedSameStream : public FusedSpMMSpMMSeqReduceRowBalance {
@@ -62,7 +77,7 @@ public:
 
 template <typename Implementation>
 bool runMethod(CudaTensorInputs *input, const std::string &matrix,
-               const char *method, int runs, int order) {
+               const char *method, int runs, int order, int fusedPercent) {
   auto *stats = new Stats(method, "SpMMSpMM", runs + 1, matrix, 1);
   auto *benchmark =
       new CheckedOutput<Implementation>(input, stats, ThreadsPerBlock);
@@ -70,6 +85,10 @@ bool runMethod(CudaTensorInputs *input, const std::string &matrix,
 
   bool correct = true;
   double fusedRows = stats->OtherStats.at("Number of Fused Rows")[0];
+  if (fusedPercent >= 0 && fusedRows != input->M * fusedPercent / 100) {
+    std::cerr << matrix << ": unexpected fused row count: " << fusedRows << '\n';
+    correct = false;
+  }
   for (int trial = 0; trial <= runs; ++trial) {
     const auto *info = stats->ProfilingInfoTrials[trial];
     correct = correct && info->ErrorPerExecute.first;
@@ -80,7 +99,7 @@ bool runMethod(CudaTensorInputs *input, const std::string &matrix,
               << info->AnalysisTime.ElapsedTimeArray[0].first * 1e6 << ','
               << fusedRows << ',' << fusedRows / input->M << ','
               << info->ErrorPerExecute.first << ','
-              << info->ErrorPerExecute.second << '\n';
+              << info->ErrorPerExecute.second << ',' << fusedPercent << '\n';
   }
   if (!correct) {
     std::cerr << matrix << ": " << method << " failed correctness verification\n";
@@ -88,6 +107,40 @@ bool runMethod(CudaTensorInputs *input, const std::string &matrix,
   delete benchmark;
   delete stats;
   return correct;
+}
+
+CSC *makeMatrix(int rows, int fusedPercent) {
+  auto *matrix = sym_lib::tridiag(rows, 0.25, 0.5, 0.25);
+  // tridiag supplies both triangles and values despite its default metadata.
+  matrix->stype = 0;
+  matrix->is_pattern = false;
+  if (fusedPercent < 0) {
+    return matrix;
+  }
+
+  auto *csr = sym_lib::csc_to_csr(matrix);
+  delete matrix;
+  // With 32 features and 128 threads, each producer tile has four rows.
+  // Select the two interior rows first to keep 50% close to the tridiagonal case.
+  const int priority[] = {2, 0, 1, 3};
+  for (int row = 0; row < rows; ++row) {
+    int tile = row / 4 * 4;
+    bool fused = priority[row % 4] < fusedPercent / 25;
+    bool crossesTile = false;
+    for (int j = csr->p[row]; j < csr->p[row + 1]; ++j) {
+      crossesTile |= csr->i[j] / 4 != row / 4;
+      if (fused) {
+        csr->i[j] = tile + csr->i[j] % 4;
+      }
+    }
+    if (!fused && !crossesTile) {
+      int offDiagonal = csr->p[row] + (csr->i[csr->p[row]] == row);
+      csr->i[offDiagonal] = (tile + 4) % rows;
+    }
+  }
+  matrix = sym_lib::csr_to_csc(csr);
+  delete csr;
+  return matrix;
 }
 
 bool parseInteger(const char *text, int minimum, int maximum, int &value) {
@@ -103,24 +156,29 @@ bool parseInteger(const char *text, int minimum, int maximum, int &value) {
 }
 
 void printUsage(const char *program) {
-  std::cerr << "Usage: " << program << " [features=32] [runs=100] [order=0]\n"
+  std::cerr << "Usage: " << program
+            << " [features=32] [runs=100] [order=0] [fused-percent]\n"
             << "  features: 32, 64, 128, or 256 dense columns\n"
             << "  runs: 1..10000 measured runs, plus one discarded warmup\n"
-            << "  order: 0..2, rotates which method runs first\n";
+            << "  order: 0..2, rotates which method runs first\n"
+            << "  fused-percent: 0, 25, 50, 75, or 100; requires features=32\n"
+            << "  omit fused-percent to use the original tridiagonal matrices\n";
 }
 
 } // namespace
 
 int main(int argc, char *argv[]) {
-  int features = 32, runs = 100, order = 0;
+  int features = 32, runs = 100, order = 0, fusedPercent = -1;
   if (argc == 2 && std::string(argv[1]) == "--help") {
     printUsage(argv[0]);
     return 0;
   }
-  if (argc > 4 ||
+  if (argc > 5 ||
       (argc > 1 && !parseInteger(argv[1], 32, 256, features)) ||
       (argc > 2 && !parseInteger(argv[2], 1, 10000, runs)) ||
       (argc > 3 && !parseInteger(argv[3], 0, 2, order)) ||
+      (argc > 4 && (!parseInteger(argv[4], 0, 100, fusedPercent) ||
+                    fusedPercent % 25 != 0 || features != 32)) ||
       (features != 32 && features != 64 && features != 128 && features != 256)) {
     printUsage(argv[0]);
     return 1;
@@ -129,14 +187,14 @@ int main(int argc, char *argv[]) {
   const int sizes[] = {64, 512, 4096, 32768, 262144, 1048576};
   std::cout << std::setprecision(10)
             << "matrix,rows,nnz,features,method,order,trial,warmup,gpu_us,"
-               "analysis_us,fused_rows,fused_ratio,correct,max_abs_error\n";
+               "analysis_us,fused_rows,fused_ratio,correct,max_abs_error,"
+               "target_fused_percent\n";
   int caseIndex = 0;
   for (int rows : sizes) {
-    auto *matrix = sym_lib::tridiag(rows, 0.25, 0.5, 0.25);
-    // tridiag supplies both triangles and values despite its default metadata.
-    matrix->stype = 0;
-    matrix->is_pattern = false;
-    std::string matrixName = "tridiagonal_" + std::to_string(rows);
+    auto *matrix = makeMatrix(rows, fusedPercent);
+    std::string matrixName = fusedPercent < 0
+        ? "tridiagonal_" + std::to_string(rows)
+        : "tile_local_" + std::to_string(rows) + "_" + std::to_string(fusedPercent);
     auto *input = new CudaTensorInputs(rows, features, rows, rows, matrix, matrix,
                                        1, runs + 1, "SpMMSpMMGraphBenchmark");
     for (int i = 0; i < rows * features; ++i) {
@@ -161,14 +219,14 @@ int main(int argc, char *argv[]) {
       int method = (caseIndex + order + position) % 3;
       bool methodCorrect;
       if (method == 0) {
-        methodCorrect = runMethod<FusedSpMMSpMMSeqReduceRowBalance>(
-            input, matrixName, "direct", runs, order);
+        methodCorrect = runMethod<FusedDirect>(
+            input, matrixName, "direct", runs, order, fusedPercent);
       } else if (method == 1) {
         methodCorrect = runMethod<FusedSameStream>(
-            input, matrixName, "direct_same_stream", runs, order);
+            input, matrixName, "direct_same_stream", runs, order, fusedPercent);
       } else {
         methodCorrect = runMethod<FusedSpMMSpMMSeqReduceRowBalanceGraph>(
-            input, matrixName, "graph", runs, order);
+            input, matrixName, "graph", runs, order, fusedPercent);
       }
       correct = correct && methodCorrect;
     }
