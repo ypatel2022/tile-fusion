@@ -87,15 +87,12 @@ int main (const int argc, const char *argv[]) {
   delete fusedSeqReduceRowBalance;
   delete stats;
 
-  std::string fusedSeqReduceRowBalanceGraphStat;
-  {
-    Stats graphStats("GPU_Fused_SeqReduceRowBalance_Graph", "SpMMSpMM", numTrial,
-                     tp._matrix_name, numThread);
-    FusedSpMMSpMMSeqReduceRowBalanceGraph graph(
-        inSpMM, &graphStats, ThreadsPerBlock);
-    graph.run();
-    fusedSeqReduceRowBalanceGraphStat = graph.printStats();
-  }
+  stats = new swiftware::benchmark::Stats("GPU_Fused_SeqReduceRowBalance_Graph","SpMMSpMM", numTrial,tp._matrix_name,numThread);
+  auto *fusedSeqReduceRowBalanceGraph = new FusedSpMMSpMMSeqReduceRowBalanceGraph(inSpMM,stats, ThreadsPerBlock);
+  fusedSeqReduceRowBalanceGraph->run();
+  auto fusedSeqReduceRowBalanceGraphStat = fusedSeqReduceRowBalanceGraph->printStats();
+  delete fusedSeqReduceRowBalanceGraph;
+  delete stats;
 
   stats = new swiftware::benchmark::Stats("GPU_Fused_Reordered_SeqReduceRowBalance","SpMMSpMM", numTrial,tp._matrix_name,numThread);
   auto *fusedSeqReduceRowBalanceReordered = new FusedSpMMSpMMSeqReduceRowBalanceReordered(inSpMM,stats, ThreadsPerBlock);
