@@ -76,9 +76,10 @@ public:
 };
 
 template <typename Implementation>
-bool runMethod(CudaTensorInputs *input, const std::string &matrix,
-               const char *method, int runs, int order, int fusedPercent) {
-  auto *stats = new Stats(method, "SpMMSpMM", runs + 1, matrix, 1);
+bool runMethod(CudaTensorInputs *input, const TestParameters &parameters,
+               const char *method, int runs, int order, int fusedPercent,
+               bool printHeader) {
+  auto *stats = new Stats(method, "SpMMSpMM", runs + 1, parameters._matrix_name, 1);
   auto *benchmark =
       new CheckedOutput<Implementation>(input, stats, ThreadsPerBlock);
   benchmark->run();
@@ -86,23 +87,27 @@ bool runMethod(CudaTensorInputs *input, const std::string &matrix,
   bool correct = true;
   double fusedRows = stats->OtherStats.at("Number of Fused Rows")[0];
   if (fusedPercent >= 0 && fusedRows != input->M * fusedPercent / 100) {
-    std::cerr << matrix << ": unexpected fused row count: " << fusedRows << '\n';
+    std::cerr << parameters._matrix_name
+              << ": unexpected fused row count: " << fusedRows << '\n';
     correct = false;
   }
   for (int trial = 0; trial <= runs; ++trial) {
     const auto *info = stats->ProfilingInfoTrials[trial];
     correct = correct && info->ErrorPerExecute.first;
-    std::cout << matrix << ',' << input->M << ',' << input->ACsr->nnz << ','
-              << input->N << ',' << method << ',' << order << ',' << trial << ','
-              << (trial == 0) << ','
-              << info->ExecutorTime.ElapsedTimeArray[0].first * 1e6 << ','
-              << info->AnalysisTime.ElapsedTimeArray[0].first * 1e6 << ','
-              << fusedRows << ',' << fusedRows / input->M << ','
-              << info->ErrorPerExecute.first << ','
-              << info->ErrorPerExecute.second << ',' << fusedPercent << '\n';
   }
+
+  // Keep the header identical when a different method runs first.
+  stats->ProfilingInfoTrials[0]->AnalysisTime.ElapsedTimeArray[0].second = "Analysis";
+  auto matrixInfo = parameters.print_csv(true);
+  if (printHeader) {
+    std::cout << benchmark->printStatsHeader() << std::get<0>(matrixInfo)
+              << "Process Order,Warmup Trials,Target Fused Percent,Fused Ratio\n";
+  }
+  std::cout << benchmark->printStats() << std::get<1>(matrixInfo)
+            << order << ",1," << fusedPercent << ',' << fusedRows / input->M << '\n';
   if (!correct) {
-    std::cerr << matrix << ": " << method << " failed correctness verification\n";
+    std::cerr << parameters._matrix_name << ": " << method
+              << " failed correctness verification\n";
   }
   delete benchmark;
   delete stats;
@@ -185,16 +190,20 @@ int main(int argc, char *argv[]) {
   }
 
   const int sizes[] = {64, 512, 4096, 32768, 262144, 1048576};
-  std::cout << std::setprecision(10)
-            << "matrix,rows,nnz,features,method,order,trial,warmup,gpu_us,"
-               "analysis_us,fused_rows,fused_ratio,correct,max_abs_error,"
-               "target_fused_percent\n";
+  std::cout << std::setprecision(10);
   int caseIndex = 0;
   for (int rows : sizes) {
     auto *matrix = makeMatrix(rows, fusedPercent);
     std::string matrixName = fusedPercent < 0
         ? "tridiagonal_" + std::to_string(rows)
         : "tile_local_" + std::to_string(rows) + "_" + std::to_string(fusedPercent);
+    TestParameters parameters;
+    parameters._matrix_name = matrixName;
+    parameters._order_method = SYM_ORDERING::NONE;
+    parameters._dim1 = parameters._dim2 = rows;
+    parameters._nnz = matrix->nnz;
+    parameters._density = double(matrix->nnz) / rows / rows;
+    parameters._b_cols = features;
     auto *input = new CudaTensorInputs(rows, features, rows, rows, matrix, matrix,
                                        1, runs + 1, "SpMMSpMMGraphBenchmark");
     for (int i = 0; i < rows * features; ++i) {
@@ -217,16 +226,18 @@ int main(int argc, char *argv[]) {
     // Graph construction is in analysis(); trial zero warms its first replay.
     for (int position = 0; position < 3; ++position) {
       int method = (caseIndex + order + position) % 3;
+      bool printHeader = caseIndex == 0 && position == 0;
       bool methodCorrect;
       if (method == 0) {
         methodCorrect = runMethod<FusedDirect>(
-            input, matrixName, "direct", runs, order, fusedPercent);
+            input, parameters, "direct", runs, order, fusedPercent, printHeader);
       } else if (method == 1) {
         methodCorrect = runMethod<FusedSameStream>(
-            input, matrixName, "direct_same_stream", runs, order, fusedPercent);
+            input, parameters, "direct_same_stream", runs, order, fusedPercent,
+            printHeader);
       } else {
         methodCorrect = runMethod<FusedSpMMSpMMSeqReduceRowBalanceGraph>(
-            input, matrixName, "graph", runs, order, fusedPercent);
+            input, parameters, "graph", runs, order, fusedPercent, printHeader);
       }
       correct = correct && methodCorrect;
     }

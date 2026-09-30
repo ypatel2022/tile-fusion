@@ -12,35 +12,40 @@ tile-fusion kernels and compares three methods:
 The same-stream method separates graph replay's benefit from removing the wait
 between kernels.
 
-From an existing CUDA-enabled build:
+From the repository root, with an existing CUDA-enabled build:
 
 ```sh
 cmake --build <build-dir> --target spmm_spmm_graph_benchmark
-<build-dir>/gpu/spmm_spmm_graph_benchmark 32 100 0 > trials.csv
+bash fusion/gpu_spmm_spmm_graph_benchmark.sh <build-dir>/gpu/spmm_spmm_graph_benchmark <log-folder>
+python3 fusion/scripts/spmm_spmm_graph_plot.py <log-folder>
 ```
 
-Arguments are feature width (32, 64, 128 or 256), measured runs, and method-order
-offset (0, 1 or 2). Defaults are `32 100 0`. Use different offsets to rotate the
-method order across repeated runs.
+The shell script runs 32 features, 100 measured trials and three processes at
+each of 0%, 25%, 50%, 75% and 100% fused rows. Method and ratio order rotate.
+Its optional third argument changes the trial count; a fourth argument of
+`tridiagonal` selects the original input family. Use a fresh log folder per sweep.
 
-The sweep uses tridiagonal sparse matrices with 64, 512, 4,096, 32,768, 262,144
-and 1,048,576 rows. Each method runs one warmup before the measured runs; exclude
-CSV rows marked `warmup=1`. Graph construction happens before warmup.
+The plotter uses pandas, NumPy and Matplotlib, as the other GPU plotters do.
+It writes `summary.csv` and latency/speedup figures in PNG and PDF, and prints
+the summary. Speedups pair process medians; error bars show the observed process
+range, not confidence intervals. Above 1x means graph execution is faster.
 
-An optional fourth argument requests 0, 25, 50, 75 or 100 percent fused rows:
+To run the executable directly:
 
 ```sh
-<build-dir>/gpu/spmm_spmm_graph_benchmark 32 100 0 75 > trials-75.csv
+<build-dir>/gpu/spmm_spmm_graph_benchmark [features=32] [runs=100] [order=0] [fused-percent]
 ```
 
-This mode requires 32 features (four rows per tile). It rewires tridiagonal
-entries within or across tiles, preserving each row's nonzero count and weights.
-The inspector's fused row count must match the requested percentage. At 100%,
-all methods retain a second kernel launch that does no work. Omitting the
-argument preserves the original matrices; `target_fused_percent` is then -1.
+Feature widths are 32, 64, 128 or 256; process order is 0, 1 or 2. An explicit
+fused percentage requires 32 features (four rows per tile). It rewires tridiagonal
+entries while preserving each row's nonzero count and weights; this also changes
+memory locality. Omitting the percentage preserves the original tridiagonal input.
+All sweeps use 64, 512, 4,096, 32,768, 262,144 and 1,048,576 rows. At 100% fusion,
+all methods retain a second kernel launch that does no work.
 
-`gpu_us` uses CUDA events and includes gaps from host submission and synchronization.
-It excludes setup, output copies and correctness checks. `analysis_us` records
-preparation time; `fused_ratio` is the fraction of output rows computed by the first kernel.
-Every run is checked against the CPU reference and for non-finite output.
-Verification failures make the benchmark exit nonzero.
+CSV uses the existing `Stats` format: one row per method and matrix, with trials
+in columns and times in seconds. Trial 0 is warmup and the plotter excludes it.
+Graph construction happens before warmup. CUDA-event timings include host
+submission/synchronization gaps and exclude setup, output copies and checks.
+`Fused Ratio` records the inspector's actual fused-row fraction. Every trial is
+checked against the CPU reference and for non-finite output; failures exit nonzero.
