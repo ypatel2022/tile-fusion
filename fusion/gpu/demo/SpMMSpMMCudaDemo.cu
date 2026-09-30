@@ -2,6 +2,7 @@
 // Created by salehm32 on 20/06/24.
 //
 #include "../Cuda_SpMM_SpMM_Demo_Utils.h"
+#include "../Cuda_SpMM_SpMM_Graph.h"
 
 #include <iostream>
 
@@ -84,6 +85,13 @@ int main (const int argc, const char *argv[]) {
 //  fusedSeqReduceRowBalance->OutTensor->printDx();
   auto fusedSeqReduceRowBalanceStat = fusedSeqReduceRowBalance->printStats();
   delete fusedSeqReduceRowBalance;
+  delete stats;
+
+  stats = new swiftware::benchmark::Stats("GPU_Fused_SeqReduceRowBalance_Graph","SpMMSpMM", numTrial,tp._matrix_name,numThread);
+  auto *fusedSeqReduceRowBalanceGraph = new FusedSpMMSpMMSeqReduceRowBalanceGraph(inSpMM,stats, ThreadsPerBlock);
+  fusedSeqReduceRowBalanceGraph->run();
+  auto fusedSeqReduceRowBalanceGraphStat = fusedSeqReduceRowBalanceGraph->printStats();
+  delete fusedSeqReduceRowBalanceGraph;
   delete stats;
 
   stats = new swiftware::benchmark::Stats("GPU_Fused_Reordered_SeqReduceRowBalance","SpMMSpMM", numTrial,tp._matrix_name,numThread);
@@ -251,6 +259,7 @@ int main (const int argc, const char *argv[]) {
 //  std::cout << unfusedCuSparseAlg2Stat << spStat + tpStat + profStat << std::endl;
 //  std::cout << unfusedCuSparseAlg3Stat << spStat + tpStat + profStat << std::endl;
   std::cout << fusedSeqReduceRowBalanceStat << spStat + tpStat + profStat << std::endl;
+  std::cout << fusedSeqReduceRowBalanceGraphStat << spStat + tpStat + profStat << std::endl;
   std::cout << fusedSeqReduceRowBalanceReorderedStat << spStat + tpStat + profStat << std::endl;
   std::cout << fusedHighFusionRatio8Stat << spStat + tpStat + profStat << std::endl;
   std::cout << fusedHighFusionRatio16Stat << spStat + tpStat + profStat << std::endl;
