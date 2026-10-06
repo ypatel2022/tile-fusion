@@ -175,12 +175,9 @@ int main(int argc, char *argv[]) {
     auto *matrix = makeStructuredMatrix(matrixCase);
     TestParameters parameters = configuredParameters;
     parameters._matrix_name = matrixCase.name();
-    parameters._order_method = SYM_ORDERING::NONE;
     parameters._dim1 = parameters._dim2 = matrixCase.rows;
     parameters._nnz = matrix->nnz;
     parameters._density = double(matrix->nnz) / matrixCase.rows / matrixCase.rows;
-    parameters._b_cols = Features;
-    parameters._embed_dim = 0;
 
     ScheduleParameters schedule(configuredSchedule);
     schedule._num_w_partition =
@@ -188,6 +185,7 @@ int main(int argc, char *argv[]) {
     auto *input = new TensorInputs<float>(
         matrixCase.rows, Features, matrixCase.rows, matrixCase.rows, matrix,
         matrix, threads, runs + 1, "SpMMSpMMStructuredBenchmark");
+    delete matrix;
     initializeDense(input->Bx, size_t(matrixCase.rows) * Features);
 
     // The sequential implementation is independent of every timed method.
@@ -201,7 +199,6 @@ int main(int argc, char *argv[]) {
     input->IsSolProvided = true;
     delete reference;
     delete stats;
-    delete matrix;
 
     for (int offset = 0; offset < 4; ++offset) {
       int method = (caseIndex + order + offset) % 4;

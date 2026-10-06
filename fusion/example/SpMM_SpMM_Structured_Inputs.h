@@ -81,8 +81,6 @@ inline sym_lib::CSC *makeStructuredMatrix(const StructuredCase &test) {
   csr->p[test.rows] = entry;
   auto *matrix = sym_lib::csr_to_csc(csr);
   delete csr;
-  matrix->stype = 0;
-  matrix->is_pattern = false;
   return matrix;
 }
 
