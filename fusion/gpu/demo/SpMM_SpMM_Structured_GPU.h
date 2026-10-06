@@ -5,8 +5,7 @@
 
 #include <limits>
 
-// Benchmark adapters keep the original kernels and buffers, while submitting
-// both dependent operations before waiting for the pair on the default stream.
+// Queue both operations on the default stream and wait after the pair.
 template <bool Replay>
 class UnfusedPair : public SpMMSpMMSeqReduceRowBalance {
   cudaGraph_t Graph = nullptr;
@@ -186,8 +185,7 @@ protected:
   }
 
   bool verify(double &error) override {
-    // Priming has already produced a correct output: a failed replay must not
-    // pass verification merely because that output was left untouched.
+    // Reject failed replays even if the priming output still passes verification.
     if (!Valid) {
       error = std::numeric_limits<double>::infinity();
       return false;

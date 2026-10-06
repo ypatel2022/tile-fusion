@@ -19,8 +19,8 @@ python3 fusion/scripts/spmm_spmm_graph_plot.py <gpu-logs> --cpu-log-folder <cpu-
 
 The CPU target requires MKL and AVX2 and can be built with CUDA disabled. It
 compares ordinary parallel SpMM, MKL, unfused AVX2 and fixed-tile fused AVX2 at
-1, 4 and 32 threads. Existing implementations are used unchanged; incorrect
-outputs or crashes are reported without repairing the implementation.
+1, 4 and 32 threads. It uses the existing implementations. The runner records
+incorrect outputs and crashes, then continues with the other processes.
 
 Both structured suites use 32 features and sparse sizes 64, 512, 4,096, 32,768,
 262,144 and 1,048,576. Each size has bands of 3/5/9 diagonals and dense diagonal
@@ -33,9 +33,9 @@ diagonal 0.5 and off-diagonal `0.5/(block-size-1)`.
 
 Each runner uses three processes with rotating method order, one discarded
 warmup and 100 measured executions. Optional runner arguments change the trial
-count and restrict structured runs to one size. Use a fresh log folder. CSV and
-stderr are retained per process; `run_status.csv` records exits. Runners continue
-other processes after failures and return nonzero if any process fails.
+count and restrict structured runs to one size. Use a fresh log folder. Each
+process writes CSV and stderr; `run_status.csv` records exit codes. Runners
+continue after failures and return nonzero if any process fails.
 
 Executable interfaces:
 
@@ -52,11 +52,11 @@ the matrix under four-row GPU tiles; it is distinct from each method's actual
 `Fused Ratio` and the CPU inspector's native schedule counters.
 
 The plotter uses pandas, NumPy and Matplotlib. It writes `summary.csv`,
-`process_medians.csv`, `failed_results.csv` and labelled PNG/PDF figures. Failed
-or incomplete methods are excluded from plots and speedups; other valid methods
-remain available. Speedups are medians of three paired process ratios; plotted
-min/max ranges are observed ranges, not confidence intervals. The optional CPU
-folder adds a latency overview and `cpu_gpu_latency.csv`; transfers and setup
+`process_medians.csv`, `failed_results.csv` and PNG/PDF figures. Plots and speedups
+require complete, correct results from all three processes. Speedups are medians
+of the three paired process ratios; plotted min/max ranges are observed ranges,
+not confidence intervals. The optional CPU folder adds a latency overview and
+`cpu_gpu_latency.csv`; transfers and setup
 are excluded, so these are executor comparisons. Record hardware with run logs.
 
 ## Original tile-fused suite

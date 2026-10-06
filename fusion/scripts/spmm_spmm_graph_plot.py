@@ -293,7 +293,7 @@ def plot_overview(gpu, cpu, folder):
                             "threads": case["threads"], "method": method, "method_label": label,
                             "executor_us": case[f"{method}_us"]})
     pd.DataFrame(records).to_csv(folder / "cpu_gpu_latency.csv", index=False)
-    # Show fixed methods, rather than an unlabeled measurement-selected winner.
+    # Plot the same named methods for every case.
     view = gpu.copy()
     series = {"graph_us": "GPU tile-fused graph", "unfused_graph_us": "GPU unfused graph",
               "cusparse_alg2_graph_us": "GPU cuSPARSE ALG2 graph", "cusparse_alg3_graph_us": "GPU cuSPARSE ALG3 graph"}

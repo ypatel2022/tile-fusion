@@ -65,8 +65,7 @@ bool printMethodStats(SWBench *benchmark, Stats *stats,
             << std::get<1>(matrixInfo) << order << ",1,-1,-1,cpu,"
             << matrixCase.family() << ',' << matrixCase.structure << ','
             << double(matrixCase.eligibleRows()) / matrixCase.rows << '\n';
-  // Preserve completed measurements if an unchanged implementation crashes
-  // during its existing cleanup.
+  // Flush each row before cleanup so a crash cannot discard the measurements.
   std::cout.flush();
   if (!correct) {
     std::cerr << parameters._matrix_name << ": " << stats->Name
