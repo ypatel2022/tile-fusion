@@ -42,6 +42,19 @@ if(TARGET MKL::MKL)
             OpenMP::OpenMP_CXX
     )
 
+    add_executable(spmm_spmm_structured_cpu_benchmark
+            SpMM_SpMM_Structured_Benchmark.cpp
+    )
+    target_include_directories(spmm_spmm_structured_cpu_benchmark PRIVATE
+            $<TARGET_PROPERTY:MKL::MKL,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    target_link_libraries(spmm_spmm_structured_cpu_benchmark
+            fusion
+            swbench::swbench
+            $<LINK_ONLY:MKL::MKL>
+            OpenMP::OpenMP_CXX
+    )
+
     add_executable(fusion_profiler
             Fusion_Profiler.cpp
     )
