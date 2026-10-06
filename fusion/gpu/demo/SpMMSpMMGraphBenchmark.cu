@@ -81,14 +81,16 @@ template <typename Implementation>
 bool runMethod(CudaTensorInputs *input, const TestParameters &parameters,
                const char *method, int runs, int order, int fusedPercent,
                bool printHeader,
-               const spmm_spmm_benchmark::StructuredCase *structured = nullptr) {
+               const spmm_spmm_benchmark::StructuredCase *structured = nullptr,
+               int tileRows = 4) {
   if (structured) {
     // A recoverable failure in an earlier method must not invalidate this one.
     cudaGetLastError();
   }
   auto *stats = new Stats(method, "SpMMSpMM", runs + 1, parameters._matrix_name, 1);
   auto *benchmark =
-      new CheckedOutput<Implementation>(input, stats, ThreadsPerBlock);
+      new CheckedOutput<Implementation>(input, stats,
+                                        structured ? 32 * tileRows : ThreadsPerBlock);
   benchmark->run();
 
   bool correct = true;
@@ -101,7 +103,7 @@ bool runMethod(CudaTensorInputs *input, const TestParameters &parameters,
   if (structured &&
       (std::string(method) == "direct_same_stream" ||
        std::string(method) == "graph") &&
-      fusedRows != structured->eligibleRows()) {
+      fusedRows != structured->eligibleRows(tileRows)) {
     std::cerr << parameters._matrix_name
               << ": unexpected structured fused row count: " << fusedRows << '\n';
     correct = false;
@@ -122,7 +124,7 @@ bool runMethod(CudaTensorInputs *input, const TestParameters &parameters,
     std::cout << benchmark->printStatsHeader() << std::get<0>(matrixInfo)
               << "Process Order,Warmup Trials,Target Fused Percent,Fused Ratio";
     if (structured) {
-      std::cout << ",Device,Matrix Family,Structure Size,Tile Eligible Ratio";
+      std::cout << ",Device,Matrix Family,Structure Size,Tile Eligible Ratio,GPU Tile Rows";
     }
     std::cout << '\n';
   }
@@ -130,7 +132,8 @@ bool runMethod(CudaTensorInputs *input, const TestParameters &parameters,
             << order << ",1," << fusedPercent << ',' << fusedRows / input->M;
   if (structured) {
     std::cout << ",gpu," << structured->family() << ',' << structured->structure
-              << ',' << double(structured->eligibleRows()) / input->M;
+              << ',' << double(structured->eligibleRows(tileRows)) / input->M
+              << ',' << tileRows;
   }
   std::cout << '\n';
   if (!correct) {
@@ -197,65 +200,78 @@ void printUsage(const char *program) {
             << "  fused-percent: 0, 25, 50, 75, or 100; requires features=32\n"
             << "  omit fused-percent to use the original tridiagonal matrices\n"
             << "       " << program
-            << " --structured [runs=100] [order=0] [rows=all]\n"
-            << "  rows: all, 64, 512, 4096, 32768, 262144, or 1048576\n";
+            << " --structured [runs=100] [order=0] [rows=all] [tile-rows=4]\n"
+            << "  rows: all, 64, 512, 4096, 32768, 262144, or 1048576\n"
+            << "  tile-rows: 1, 4, or 16; original kernels use 32 threads per row\n"
+            << "  optional profiling filters: [matrix-name=all] [method-index=all]\n"
+            << "  methods: 0/1 unfused direct/graph, 2/3 ALG2 direct/graph,\n"
+            << "           4/5 ALG3 direct/graph, 6/7 fused direct/graph\n";
 }
 
 bool runStructuredMethod(int method, CudaTensorInputs *input,
                          const TestParameters &parameters, int runs, int order,
                          bool printHeader,
-                         const spmm_spmm_benchmark::StructuredCase &testCase) {
+                         const spmm_spmm_benchmark::StructuredCase &testCase,
+                         int tileRows) {
   switch (method) {
   case 0:
     return runMethod<UnfusedPair<false>>(
         input, parameters, "unfused_direct", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 1:
     return runMethod<UnfusedPair<true>>(
         input, parameters, "unfused_graph", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 2:
     return runMethod<CuSparsePair<CUSPARSE_SPMM_CSR_ALG2, false>>(
         input, parameters, "cusparse_alg2_direct", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 3:
     return runMethod<CuSparsePair<CUSPARSE_SPMM_CSR_ALG2, true>>(
         input, parameters, "cusparse_alg2_graph", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 4:
     return runMethod<CuSparsePair<CUSPARSE_SPMM_CSR_ALG3, false>>(
         input, parameters, "cusparse_alg3_direct", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 5:
     return runMethod<CuSparsePair<CUSPARSE_SPMM_CSR_ALG3, true>>(
         input, parameters, "cusparse_alg3_graph", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   case 6:
     return runMethod<FusedSameStream>(
         input, parameters, "direct_same_stream", runs, order, -1, printHeader,
-        &testCase);
+        &testCase, tileRows);
   default:
     return runMethod<FusedSpMMSpMMSeqReduceRowBalanceGraph>(
-        input, parameters, "graph", runs, order, -1, printHeader, &testCase);
+        input, parameters, "graph", runs, order, -1, printHeader, &testCase, tileRows);
   }
 }
 
 int runStructured(int argc, char *argv[]) {
-  int runs = 100, order = 0, rowFilter = 0;
-  if (argc > 5 ||
+  int runs = 100, order = 0, rowFilter = 0, tileRows = 4, methodFilter = -1;
+  std::string matrixFilter = argc > 6 ? argv[6] : "all";
+  if (argc > 8 ||
       (argc > 2 && !parseInteger(argv[2], 1, 10000, runs)) ||
       (argc > 3 && !parseInteger(argv[3], 0, 2, order)) ||
       (argc > 4 && std::string(argv[4]) != "all" &&
        (!parseInteger(argv[4], 64, 1048576, rowFilter) ||
-        !spmm_spmm_benchmark::validRows(rowFilter)))) {
+        !spmm_spmm_benchmark::validRows(rowFilter))) ||
+      (argc > 5 && (!parseInteger(argv[5], 1, 16, tileRows) ||
+                    (tileRows != 1 && tileRows != 4 && tileRows != 16))) ||
+      (argc > 7 && std::string(argv[7]) != "all" &&
+       !parseInteger(argv[7], 0, 7, methodFilter))) {
     printUsage(argv[0]);
     return 1;
   }
 
-  bool correct = true;
+  bool correct = true, printHeader = true;
   int caseIndex = 0;
   std::cout << std::setprecision(10);
   for (const auto &testCase : spmm_spmm_benchmark::structuredCases(rowFilter)) {
+    if (matrixFilter != "all" && matrixFilter != testCase.name()) {
+      continue;
+    }
     auto *matrix = spmm_spmm_benchmark::makeStructuredMatrix(testCase);
     TestParameters parameters;
     parameters._matrix_name = testCase.name();
@@ -283,16 +299,19 @@ int runStructured(int argc, char *argv[]) {
 
     for (int position = 0; position < 8; ++position) {
       int method = (caseIndex + order + position) % 8;
+      if (methodFilter >= 0 && method != methodFilter) {
+        continue;
+      }
       bool methodCorrect = runStructuredMethod(
-          method, input, parameters, runs, order,
-          caseIndex == 0 && position == 0, testCase);
+          method, input, parameters, runs, order, printHeader, testCase, tileRows);
+      printHeader = false;
       correct = methodCorrect && correct;
     }
     delete input;
     delete matrix;
     ++caseIndex;
   }
-  return correct ? 0 : 1;
+  return correct && caseIndex > 0 ? 0 : 1;
 }
 
 } // namespace

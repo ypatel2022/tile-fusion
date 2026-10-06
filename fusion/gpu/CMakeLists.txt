@@ -83,6 +83,27 @@ target_link_libraries(spmm_spmm_graph_benchmark
         swbench::swbench
 )
 
+add_executable(gemm_spmm_graph_benchmark
+        demo/GEMMSpMMGraphBenchmark.cu
+)
+
+set_target_properties(gemm_spmm_graph_benchmark PROPERTIES CUDA_COMPILE_FLAGS "${CUDA_COMPILE_FLAGS}"
+)
+
+target_include_directories(gemm_spmm_graph_benchmark
+        PRIVATE
+        ${SYM_AGG}/include
+        ${SYM_FUS}/include
+)
+target_link_libraries(gemm_spmm_graph_benchmark
+        cusparse
+        cublas
+        CUDA::cusparse
+        fusion
+        aggregation
+        swbench::swbench
+)
+
 add_executable(spmm_seqred_demo_gpu
         demo/SeqReduceBlockDemo.cu
 )

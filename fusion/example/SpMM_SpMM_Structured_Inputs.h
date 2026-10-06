@@ -25,12 +25,14 @@ struct StructuredCase {
            std::to_string(rows);
   }
 
-  // Input property for four-row GPU producer tiles, independent of CPU scheduling.
-  int eligibleRows() const {
+  // Input property for GPU producer tiles, independent of CPU scheduling.
+  int eligibleRows(int tileRows = 4) const {
     if (blockDiagonal) {
-      return structure == 4 ? rows : 0;
+      return tileRows % structure == 0 ? rows : 0;
     }
-    return structure == 3 ? rows / 2 + 2 : (structure == 5 ? 4 : 0);
+    int halfBand = structure / 2;
+    return (rows / tileRows - 2) * std::max(tileRows - 2 * halfBand, 0) +
+           2 * std::max(tileRows - halfBand, 0);
   }
 };
 
