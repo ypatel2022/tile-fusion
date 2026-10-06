@@ -331,9 +331,10 @@ def main():
     summary = write_summary(args.log_folder)
     if args.cpu_log_folder:
         cpu = write_summary(args.cpu_log_folder)
-        gpu = summary[summary["device"] == "GPU"]
-        if not gpu.empty and not cpu.empty:
-            plot_overview(gpu, cpu[cpu["device"] == "CPU"], args.log_folder)
+        if not summary.empty and not cpu.empty:
+            gpu = summary[summary["device"] == "GPU"]
+            if not gpu.empty:
+                plot_overview(gpu, cpu[cpu["device"] == "CPU"], args.log_folder)
     print("Saved summary.csv, process_medians.csv, failed_results.csv and available PNG/PDF figures.")
 
 

@@ -42,7 +42,7 @@ if(TARGET MKL::MKL)
             OpenMP::OpenMP_CXX
     )
 
-    add_executable(spmm_spmm_structured_cpu_benchmark
+    add_executable(spmm_spmm_structured_cpu_benchmark EXCLUDE_FROM_ALL
             SpMM_SpMM_Structured_Benchmark.cpp
     )
     target_include_directories(spmm_spmm_structured_cpu_benchmark PRIVATE
