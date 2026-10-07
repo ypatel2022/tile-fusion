@@ -29,6 +29,7 @@ struct TileSchedule {
   int *deferredPtr = nullptr, *deferredId = nullptr;
   int *reversePtr = nullptr, *reverseId = nullptr, *dependencies = nullptr;
   unsigned long long *events = nullptr;
+  unsigned char *hStoreMask = nullptr;
 };
 
 // One lane owns one feature; preserve the original CSR accumulation order.
@@ -97,7 +98,9 @@ __global__ void eventKernel(KernelData data, TileSchedule schedule,
   int feature = threadIdx.x;
   if (row < data.rows) {
     float sum = rowSum<false>(row, feature, data, data.x);
-    data.h[row * Features + feature] = sum;
+    if (!SharedH || !schedule.hStoreMask || schedule.hStoreMask[row]) {
+      data.h[row * Features + feature] = sum;
+    }
     if (SharedH) sharedH[threadIdx.y * Features + feature] = sum;
   }
   __syncthreads();
@@ -132,12 +135,13 @@ __global__ void eventKernel(KernelData data, TileSchedule schedule,
   }
 }
 
-int *upload(const std::vector<int> &values) {
+template <typename T>
+T *upload(const std::vector<T> &values) {
   if (values.empty()) return nullptr;
-  int *device = nullptr;
-  check(cudaMalloc(&device, values.size() * sizeof(int)));
+  T *device = nullptr;
+  check(cudaMalloc(&device, values.size() * sizeof(T)));
   try {
-    check(cudaMemcpy(device, values.data(), values.size() * sizeof(int),
+    check(cudaMemcpy(device, values.data(), values.size() * sizeof(T),
                      cudaMemcpyHostToDevice));
   } catch (...) {
     cudaFree(device);
@@ -164,6 +168,7 @@ class Megakernel : public Method {
     cudaFree(Schedule.reverseId);
     cudaFree(Schedule.dependencies);
     cudaFree(Schedule.events);
+    cudaFree(Schedule.hStoreMask);
   }
 
   void inspect(const Matrix &matrix) {
@@ -171,6 +176,7 @@ class Megakernel : public Method {
     std::vector<int> deferredPtr(Tiles + 1), deferredId;
     std::vector<int> counts(Tiles), reversePtr(Tiles + 1), reverseId;
     std::vector<std::vector<int>> reverse(Tiles);
+    std::vector<unsigned char> storedH(Shared ? matrix.rows : 0, 0);
     for (int tile = 0; tile < Tiles; ++tile) {
       int first = tile * Data.tileRows;
       int end = std::min(first + Data.tileRows, matrix.rows);
@@ -189,6 +195,9 @@ class Megakernel : public Method {
           deferredId.push_back(row);
           for (int p = matrix.rowPtr[row]; p < matrix.rowPtr[row + 1]; ++p) {
             producers.push_back(matrix.columns[p] / Data.tileRows);
+            // A deferred callback can run in another producer CTA, including
+            // for home-tile H. Cover every possible global H read.
+            if (Shared) storedH[matrix.columns[p]] = 1;
           }
         }
       }
@@ -214,6 +223,15 @@ class Megakernel : public Method {
     scheduleBytes = (localPtr.size() + localId.size() + deferredPtr.size() +
                      deferredId.size() + reversePtr.size() + reverseId.size() +
                      counts.size()) * sizeof(int);
+    if (Shared) {
+      size_t storedRows = std::count(storedH.begin(), storedH.end(), 1);
+      hWriteBytes = storedRows * Features * sizeof(float);
+      // nullptr means store all H; avoid an all-ones mask when nothing is saved.
+      if (storedRows < static_cast<size_t>(matrix.rows)) {
+        Schedule.hStoreMask = upload(storedH);
+        scheduleBytes += storedH.size() * sizeof(unsigned char);
+      }
+    }
     if (!reverseId.empty()) {
       eventBytes = static_cast<size_t>(Tiles) * sizeof(unsigned long long);
       check(cudaMalloc(&Schedule.events, eventBytes));
@@ -229,6 +247,7 @@ public:
         SharedBytes(Shared ? data.tileRows * Features * sizeof(float) : 0) {
     auto begin = std::chrono::steady_clock::now();
     try {
+      hWriteBytes = static_cast<size_t>(Data.rows) * Features * sizeof(float);
       if (!Barrier) inspect(matrix);
       if (Barrier) {
         int device, multiprocessors, active, supported;
@@ -246,7 +265,6 @@ public:
       check(cudaDeviceSynchronize());
       inspectionSeconds = std::chrono::duration<double>(
           std::chrono::steady_clock::now() - begin).count();
-      hWriteBytes = static_cast<size_t>(Data.rows) * Features * sizeof(float);
     } catch (...) {
       cleanup();
       throw;
@@ -278,6 +296,9 @@ public:
   }
 
   size_t workspaceBytes() const override { return scheduleBytes + eventBytes; }
+  bool writesH() const override {
+    return hWriteBytes == static_cast<size_t>(Data.rows) * Features * sizeof(float);
+  }
   ~Megakernel() { cleanup(); }
 };
 

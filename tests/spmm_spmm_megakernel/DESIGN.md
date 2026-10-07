@@ -18,8 +18,17 @@ It already has all the H it needs; it never waits for another block.
 
 `megakernel_events_global` reads H from global memory. The shared variant keeps
 its own producer H tile in shared memory and uses it wherever a consumer needs
-those rows. H from other blocks goes through global memory. The initial versions
-write every H row globally; shared memory is private to its owning block.
+those rows. H from other blocks goes through global memory; shared memory is
+private to its owning block. The initial versions wrote every H row globally.
+
+The shared variant now marks every H row referenced by any deferred Y row and
+stores only those rows globally. This includes references within the consumer's
+home tile: another producer can execute its callback. Local Y reads its own
+shared tile; every possible global H read by a deferred callback has a current
+producer store. Every H row is still computed. The topology-only byte mask is
+uploaded during setup and omitted when all H rows need stores. The benchmark
+retains the full H allocation, counts mask bytes in schedule storage, and reports
+global H writes separately.
 
 The schedule follows the original inspector's tile-membership test. That small
 test is repeated here because its class header defines GPU kernels and cannot be
