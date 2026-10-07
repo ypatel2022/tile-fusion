@@ -11,6 +11,8 @@ For an eight-row tridiagonal A with four rows per tile:
 | 0 | H0–H3 | Y0–Y2 | Y3 needs H2, H3, H4 |
 | 1 | H4–H7 | Y5–Y7 | Y4 needs H3, H4, H5 |
 
+Every H tile reads X, which is already available. Only Y depends on completed H.
+
 Each deferred group counts its distinct producer tiles. Both groups above need
 two producers. A producer computes H, finishes its local Y rows, then notifies
 every dependent group. The last notification computes that group's deferred Y.
@@ -37,8 +39,9 @@ deferred row lists partition Y; producer dependencies are deduplicated.
 
 ## Visibility and progress
 
-All producer threads write H and reach a block barrier. The leader publishes
-completion with a device-scope acquire/release compare-and-swap. Notifications
+All producer threads compute H, finish their required stores and reach a block
+barrier. The leader publishes completion with a device-scope acquire/release
+compare-and-swap. Notifications
 form a chain on the same event word, so the final notifier observes every
 producer's H writes. A block barrier passes that visibility to the consumer
 threads. Cross-block H reads use ordinary global loads. Consumer callbacks keep
