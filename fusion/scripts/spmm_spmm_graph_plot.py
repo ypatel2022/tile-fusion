@@ -23,12 +23,6 @@ GPU_METHODS = {
     "direct_same_stream": "Tile-fused direct",
     "graph": "Tile-fused graph",
 }
-GEMM_METHODS = {
-    "cublas_cusparse_alg2_direct": "cuBLAS + cuSPARSE ALG2 direct",
-    "cublas_cusparse_alg2_graph": "cuBLAS + cuSPARSE ALG2 graph",
-    "cublas_cusparse_alg3_direct": "cuBLAS + cuSPARSE ALG3 direct",
-    "cublas_cusparse_alg3_graph": "cuBLAS + cuSPARSE ALG3 graph",
-}
 CPU_METHODS = {
     "cpu_unfused": "Ordinary parallel SpMM",
     "cpu_mkl": "MKL",
@@ -37,24 +31,21 @@ CPU_METHODS = {
 }
 CASE_COLUMNS = ["Matrix Name", "nRows", "NNZ", "bCols", "Target Fused Percent",
                 "Device", "Number of Threads", "Matrix Family", "Structure Size",
-                "Operation Name", "GPU Tile Rows"]
+                "GPU Tile Rows"]
 SIZES = [64, 512, 4096, 32768, 262144, 1048576]
 STRUCTURES = [("banded", 3), ("banded", 5), ("banded", 9),
               ("block_diagonal", 4), ("block_diagonal", 16)]
 
 
-def methods_for(device, family, operation="SpMMSpMM"):
+def methods_for(device, family):
     if device == "CPU":
         return CPU_METHODS
-    if operation == "GEMMSpMM":
-        return GEMM_METHODS
     return GPU_METHODS if family in {"banded", "block_diagonal"} else LEGACY_METHODS
 
 
 def read_process_medians(log_folder):
     files = sorted(log_folder.glob("spmm_spmm_graph_*.csv"))
     files += sorted(log_folder.glob("spmm_spmm_cpu_*.csv"))
-    files += sorted(log_folder.glob("gemm_spmm_graph_*.csv"))
     status_path = log_folder / "run_status.csv"
     statuses = pd.read_csv(status_path) if status_path.exists() else pd.DataFrame()
     if not files and statuses.empty:
@@ -74,7 +65,6 @@ def read_process_medians(log_folder):
             record.setdefault("Matrix Family", "tridiagonal" if row["Target Fused Percent"] == -1 else "rewired")
             record.setdefault("Structure Size", -1)
             record.setdefault("Tile Eligible Ratio", row["Fused Ratio"])
-            record.setdefault("Operation Name", "SpMMSpMM")
             if "GPU Tile Rows" not in record:
                 record["GPU Tile Rows"] = -1 if record["Device"] == "CPU" else np.nan
                 if record["Device"] == "GPU" and pd.notna(record.get("bCols")):
@@ -117,11 +107,7 @@ def read_process_medians(log_folder):
     return result
 
 
-def comparisons_for(device, family, operation="SpMMSpMM"):
-    if operation == "GEMMSpMM":
-        return [(f"cublas_cusparse_alg{algorithm}_direct",
-                 f"cublas_cusparse_alg{algorithm}_graph", f"alg{algorithm}_graph_vs_direct")
-                for algorithm in [2, 3]]
+def comparisons_for(device, family):
     if device == "CPU":
         return [("cpu_unfused", "cpu_avx2_fused", "fusion_vs_unfused"),
                 ("cpu_mkl", "cpu_avx2_fused", "fusion_vs_mkl"),
@@ -143,25 +129,24 @@ def comparisons_for(device, family, operation="SpMMSpMM"):
 def expected_cases(data):
     cases = [] if data.empty else data[CASE_COLUMNS].drop_duplicates().to_dict("records")
     known = {(case["Matrix Name"], case["Device"], int(case["Number of Threads"]),
-              case["Operation Name"], int(case["GPU Tile Rows"])) for case in cases}
+              int(case["GPU Tile Rows"])) for case in cases}
     for _, run in data.attrs["statuses"].iterrows():
         if run["suite"] != "structured":
             continue
         sizes = SIZES if str(run["rows"]) == "all" else [int(run["rows"])]
         device, threads = str(run["device"]).upper(), int(run["threads"])
-        operation = run.get("operation", "SpMMSpMM")
         tile_rows = int(run.get("tile_rows", 4 if device == "GPU" else -1))
         for size in sizes:
             for family, structure in STRUCTURES:
                 name = f"{family}_{structure}_{size}"
-                key = (name, device, threads, operation, tile_rows)
+                key = (name, device, threads, tile_rows)
                 if key in known:
                     continue
                 nnz = (size * structure - (structure // 2) * (structure // 2 + 1)
                        if family == "banded" else size * structure)
                 cases.append(dict(zip(CASE_COLUMNS, [name, size, nnz, 32, -1,
                                                      device, threads, family, structure,
-                                                     operation, tile_rows])))
+                                                     tile_rows])))
                 known.add(key)
     return cases
 
@@ -174,14 +159,13 @@ def summarize(data):
             if not rows.empty:
                 rows = rows[rows[key] == value]
         device, family = case["Device"], case["Matrix Family"]
-        operation = case["Operation Name"]
-        methods = methods_for(device, family, operation)
+        methods = methods_for(device, family)
         record = {"matrix": case["Matrix Name"], "rows": int(case["nRows"]),
                   "nnz": int(case["NNZ"]), "features": int(case["bCols"]),
                   "target_fused_percent": int(case["Target Fused Percent"]),
                   "device": device, "threads": int(case["Number of Threads"]),
                   "family": family, "structure_size": int(case["Structure Size"]),
-                  "operation": operation, "gpu_tile_rows": int(case["GPU Tile Rows"])}
+                  "gpu_tile_rows": int(case["GPU Tile Rows"])}
         record["fused_ratio"] = rows["Fused Ratio"].max() if not rows.empty else np.nan
         record["tile_eligible_ratio"] = rows["Tile Eligible Ratio"].iloc[0] if not rows.empty else np.nan
         valid = {}
@@ -197,13 +181,13 @@ def summarize(data):
                     issues.append({"file": process.iloc[0]["file"] if not process.empty else "",
                                    "Matrix Name": case["Matrix Name"], "Device": device,
                                    "Number of Threads": record["threads"], "Implementation Name": method,
-                                   "Operation Name": operation, "GPU Tile Rows": record["gpu_tile_rows"],
+                                   "GPU Tile Rows": record["gpu_tile_rows"],
                                    "Process Order": order, "status": status})
             valid[method] = pd.Series(values, dtype=float)
             record[f"{method}_valid_processes"] = len(values)
             # Incomplete methods remain in the raw table, but do not enter plots or rankings.
             record[f"{method}_us"] = valid[method].median() if len(values) == 3 else np.nan
-        for baseline, candidate, label in comparisons_for(device, family, operation):
+        for baseline, candidate, label in comparisons_for(device, family):
             ratios = valid[baseline] / valid[candidate]
             complete = len(valid[baseline]) == len(valid[candidate]) == 3
             record[label] = ratios.median() if complete else np.nan
@@ -212,7 +196,7 @@ def summarize(data):
         records.append(record)
     summary = pd.DataFrame(records)
     summary.attrs["issues"] = issues
-    return summary.sort_values(["operation", "device", "threads", "gpu_tile_rows", "features", "target_fused_percent",
+    return summary.sort_values(["device", "threads", "gpu_tile_rows", "features", "target_fused_percent",
                                 "family", "structure_size", "rows"]) if not summary.empty else summary
 
 
@@ -246,7 +230,7 @@ def plot_panels(summary, folder, filename, title, series, speedup=False):
             ax.set_ylabel("Baseline time / candidate time (×)")
         else:
             ax.set_yscale("log")
-            ax.set_ylabel("Time per operation pair (µs)")
+            ax.set_ylabel("Time per SpMM pair (µs)")
         if family == "banded":
             name = f"Banded · {structure} diagonals"
         elif family == "block_diagonal":
@@ -276,7 +260,7 @@ def plot_panels(summary, folder, filename, title, series, speedup=False):
 
 
 def plot_results(summary, folder):
-    for (operation, device, threads), rows in summary.groupby(["operation", "device", "threads"]):
+    for (device, threads), rows in summary.groupby(["device", "threads"]):
         if device == "CPU":
             plot_panels(rows, folder, f"spmm_spmm_cpu_latency_threads{threads}",
                         f"CPU execution · {threads} threads", {f"{key}_us": label for key, label in CPU_METHODS.items()})
@@ -284,13 +268,6 @@ def plot_results(summary, folder):
                         f"CPU tile-fusion speedup · {threads} threads",
                         {"fusion_vs_unfused": "Fusion vs ordinary SpMM", "fusion_vs_mkl": "Fusion vs MKL",
                          "fusion_vs_avx2": "Fusion vs unfused AVX2"}, speedup=True)
-            continue
-        if operation == "GEMMSpMM":
-            plot_panels(rows, folder, "gemm_spmm_gpu_latency", "GPU GEMM–SpMM execution time",
-                        {f"{key}_us": label for key, label in GEMM_METHODS.items()})
-            plot_panels(rows, folder, "gemm_spmm_graph_gain", "GPU GEMM–SpMM graph replay speedup",
-                        {"alg2_graph_vs_direct": "cuBLAS + cuSPARSE ALG2",
-                         "alg3_graph_vs_direct": "cuBLAS + cuSPARSE ALG3"}, True)
             continue
         legacy = rows[~rows["family"].isin(["banded", "block_diagonal"])]
         if not legacy.empty:
@@ -320,24 +297,24 @@ def plot_overview(gpu, cpu, folder):
     joined = pd.concat([gpu, cpu], ignore_index=True)
     records = []
     for _, case in joined.iterrows():
-        methods = methods_for(case["device"], case["family"], case["operation"])
+        methods = methods_for(case["device"], case["family"])
         for method, label in methods.items():
             if f"{method}_us" not in case:
                 continue
             records.append({"matrix": case["matrix"], "rows": case["rows"], "nnz": case["nnz"],
                             "features": case["features"], "family": case["family"],
                             "structure_size": case["structure_size"], "device": case["device"],
-                            "operation": case["operation"], "gpu_tile_rows": case["gpu_tile_rows"],
+                            "gpu_tile_rows": case["gpu_tile_rows"],
                             "threads": case["threads"], "method": method, "method_label": label,
                             "executor_us": case[f"{method}_us"]})
     pd.DataFrame(records).to_csv(folder / "cpu_gpu_latency.csv", index=False)
     # Plot the same named methods for every case.
-    view = gpu[(gpu["operation"] == "SpMMSpMM") & (gpu["gpu_tile_rows"] == 4)].copy()
+    view = gpu[gpu["gpu_tile_rows"] == 4].copy()
     if view.empty:
         return
     series = {"graph_us": "GPU tile-fused graph", "unfused_graph_us": "GPU unfused graph",
               "cusparse_alg2_graph_us": "GPU cuSPARSE ALG2 graph", "cusparse_alg3_graph_us": "GPU cuSPARSE ALG3 graph"}
-    keys = ["operation", "matrix", "rows", "nnz", "features", "family", "structure_size"]
+    keys = ["matrix", "rows", "nnz", "features", "family", "structure_size"]
     for threads in [1, 4, 32]:
         columns = keys + ["cpu_avx2_fused_us", "cpu_mkl_us"]
         selected = cpu[cpu["threads"] == threads][columns].rename(columns={
@@ -353,7 +330,7 @@ def write_summary(folder):
     summary = summarize(data)
     data.to_csv(folder / "process_medians.csv", index=False)
     pd.DataFrame(summary.attrs["issues"], columns=["file", "Matrix Name", "Device", "Number of Threads",
-                                                  "Operation Name", "GPU Tile Rows", "Implementation Name",
+                                                  "GPU Tile Rows", "Implementation Name",
                                                   "Process Order", "status"]).to_csv(folder / "failed_results.csv", index=False)
     summary.to_csv(folder / "summary.csv", index=False)
     if not summary.empty:
@@ -365,7 +342,7 @@ def write_summary(folder):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Summarize native SpMM–SpMM and GEMM–SpMM benchmark CSVs.")
+    parser = argparse.ArgumentParser(description="Summarize native CPU/GPU SpMM–SpMM benchmark CSVs.")
     parser.add_argument("log_folder", type=Path)
     parser.add_argument("--cpu-log-folder", type=Path, help="Also summarize a CPU sweep and compare executor latencies.")
     args = parser.parse_args()

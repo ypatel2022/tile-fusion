@@ -87,21 +87,3 @@ The plotter also writes `process_medians.csv`, `failed_results.csv` and, with a
 CPU folder, `cpu_gpu_latency.csv` and a latency overview. Comparisons require
 three correct paired processes; speedups are baseline time divided by candidate time.
 Archived native CSVs remain supported.
-
-## GEMM-SpMM GPU baselines
-
-`gemm_spmm_graph_benchmark` computes `H = X W; Y = A H` on the same structured
-matrices. `X` has 32 columns and `W` is 32 by 32. It compares cuBLAS SGEMM followed
-by cuSPARSE ALG2/ALG3, each directly and with graph replay. These are vendor
-pipelines; no GPU GEMM-SpMM fusion kernel is included. cuBLAS uses
-`CUBLAS_PEDANTIC_MATH` for standard float32, without reduced-precision Tensor Core math.
-
-```sh
-cmake --build <gpu-build> --target gemm_spmm_graph_benchmark
-bash fusion/gemm_spmm_graph_benchmark.sh <gpu-build>/gpu/gemm_spmm_graph_benchmark <gemm-logs>
-python3 fusion/scripts/spmm_spmm_graph_plot.py <gemm-logs>
-```
-
-Warmup, trials, timing exclusions and CSV statistics match the SpMM pair suite.
-Every output is checked against a scalar reference accumulated in double precision.
-Plots keep operation and GPU tile size separate.

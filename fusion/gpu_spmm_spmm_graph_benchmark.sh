@@ -51,7 +51,7 @@ for file in "$LOGS"/spmm_spmm_graph_*.csv "$LOGS/run_status.csv"; do
     fi
 done
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-printf 'file,device,threads,process_order,suite,rows,exit_code,operation,tile_rows\n' > "$LOGS/run_status.csv"
+printf 'file,device,threads,process_order,suite,rows,exit_code,tile_rows\n' > "$LOGS/run_status.csv"
 failed=0
 for order in 0 1 2; do
     for index in "${!CASES[@]}"; do
@@ -71,7 +71,7 @@ for order in 0 1 2; do
         echo "Running $SUITE case $matrix_case, process order $order"
         status=0
         "$BINLIB" "${args[@]}" > "$LOGS/$stem.csv" 2> "$LOGS/$stem.err" || status=$?
-        printf '%s,GPU,1,%s,%s,%s,%s,SpMMSpMM,%s\n' "$stem.csv" "$order" "$SUITE" "$ROWS" "$status" "$tile" >> "$LOGS/run_status.csv"
+        printf '%s,GPU,1,%s,%s,%s,%s,%s\n' "$stem.csv" "$order" "$SUITE" "$ROWS" "$status" "$tile" >> "$LOGS/run_status.csv"
         if [ "$status" -ne 0 ]; then
             echo "$stem exited with status $status; preserved CSV and stderr." >&2
             failed=1
