@@ -119,6 +119,34 @@ based on the sample config file.
 Plots will be stored in the same folder as the log folder.
 
 
+## GeMM-SpMM tile fusion with CUDA graphs
+
+`gemm_spmm_graph_demo_gpu` computes `D1 = B C; D = A D1` with cuBLAS GeMM and
+a black-box SpMM, arranged as the tile fusion schedule of the GeMM-SpMM DAG.
+Each first-level graph node runs GeMM for a block of consecutive rows, then
+SpMM for the rows whose nonzeros all fall in that block. The remaining rows
+form second-level SpMM nodes that wait only for the blocks they read
+(`GPU_Fused_Graph_*`), or for all first-level nodes (`GPU_Fused_Barrier_Graph_*`).
+`GPU_Unfused_Tiled_Graph_*` runs the same tiles with every SpMM after all GeMMs,
+and `GPU_Unfused_{Direct,Graph}_*` run one GeMM and one SpMM. SpMM is the
+`SeqReduceRowBalance` row-list kernel or cuSPARSE CSR ALG2/ALG3 on a contiguous
+block of rows.
+
+Create banded and block-diagonal matrices, then run each one:
+
+```bash
+python scripts/gen_matrix_folder.py -f ./data/structured -b 3 5 9 -bd 4 16 -sl 65536 262144 1048576
+./build/gpu/gemm_spmm_graph_demo_gpu -sm ./data/structured/9_banded_1048576.mtx -bc 32 -ah
+```
+
+or run the whole folder with `bash run.sh -t 1 -m ./data/structured -c 32 -e gpu_gemm_spmm_graph`.
+
+`-bc` sets the columns of `B`, `C` and `D`. Without `-ip` the demo sweeps
+1024 to 262144 rows per tile below the matrix size; `-ip` selects one, recorded
+as `Iter Per Partition` in the CSV. Each method runs 7 trials, starting from
+poisoned outputs and an evicted L2, and every trial is checked against a CPU
+reference.
+
 ## Profiling with PAPI
 You will need to build the code with PAPI support. Please check the 
 swiftware benchmark repo for details. The 'test_papi.sh' script provides
