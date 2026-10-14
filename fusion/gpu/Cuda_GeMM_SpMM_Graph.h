@@ -76,8 +76,8 @@ __global__ void evictL2Kernel(const float *Data, size_t Count, float *Sink) {
 //
 // First-level node f covers rows [f t, (f + 1) t) for t = TileRows: a GeMM for
 // those rows of D1, then the SpMM for the rows of D whose nonzeros all lie in
-// that block. Each run of consecutive remaining rows is a second-level node
-// running only SpMM, ordered after first-level nodes as Schedule says. With
+// that block. The remaining rows form second-level nodes running only SpMM,
+// ordered after first-level nodes as Schedule says. With
 // TileRows >= n there is one first-level node: the unfused GeMM then SpMM.
 class GeMMSpMMTileFusionGraph : public SeqGeMMSpMM {
   struct Task {
@@ -182,20 +182,24 @@ class GeMMSpMMTileFusionGraph : public SeqGeMMSpMM {
       St->OtherStats["Number of Fused Nnz"] = {double(fusedNnz)};
     }
 
+    // Consecutive remaining rows that read the same tiles form one second-level
+    // node, so no row waits for a tile it does not read.
+    auto tilesRead = [&](int Row) {
+      std::set<int> tiles;
+      for (int j = ap[Row]; j < ap[Row + 1]; ++j) {
+        tiles.insert(ai[j] / TileRows);
+      }
+      return tiles;
+    };
     for (size_t first = 0; first < unfused.size();) {
+      std::set<int> tiles = tilesRead(unfused[first]);
       size_t last = first + 1;
-      while (last < unfused.size() && unfused[last] == unfused[last - 1] + 1) {
+      while (last < unfused.size() && unfused[last] == unfused[last - 1] + 1 &&
+             tilesRead(unfused[last]) == tiles) {
         ++last;
       }
       Task task{0, 0, int(Rows.size()), 0, {}};
-      std::set<int> tiles;
-      for (size_t r = first; r < last; ++r) {
-        int row = unfused[r];
-        Rows.push_back(row);
-        for (int j = ap[row]; j < ap[row + 1]; ++j) {
-          tiles.insert(ai[j] / TileRows);
-        }
-      }
+      Rows.insert(Rows.end(), unfused.begin() + first, unfused.begin() + last);
       task.SpMMEnd = Rows.size();
       task.Tiles.assign(tiles.begin(), tiles.end());
       Tasks.push_back(task);
