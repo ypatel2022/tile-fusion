@@ -119,6 +119,28 @@ based on the sample config file.
 Plots will be stored in the same folder as the log folder.
 
 
+## GeMM-SpMM tile fusion with CUDA graphs
+
+`gemm_spmm_graph_example_gpu` is a small example of the tile fusion schedule of
+`D1 = B C; D = A D1` as a CUDA graph. Each first-level node runs GeMM for a
+block of consecutive rows, then SpMM for the rows whose nonzeros all fall in
+that block. Second-level nodes run SpMM for the remaining rows, after only the
+blocks they read. It builds the graph once with hand-written GeMM and SpMM
+kernels and once with cuBLAS and cuSPARSE, prints the schedule and checks both
+results against a CPU reference.
+
+From `fusion/`:
+
+```bash
+cmake -S . -B build -DENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target gemm_spmm_graph_example_gpu
+python scripts/gen_matrix_folder.py -f ./data/small -b 3 5 -sl 32 64
+./build/gpu/gemm_spmm_graph_example_gpu -sm ./data/small/3_banded_64.mtx -bc 32 -ip 16
+```
+
+`-bc` sets k, the columns of `B` (n x k features), `C` (k x k) and `D`, and
+`-ip` the rows per tile (default 8).
+
 ## Profiling with PAPI
 You will need to build the code with PAPI support. Please check the 
 swiftware benchmark repo for details. The 'test_papi.sh' script provides
