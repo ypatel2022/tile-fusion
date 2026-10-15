@@ -203,7 +203,8 @@ std::vector<float> runGraphHandWritten(CudaTensorInputs *In,
 
   cudaStream_t stream;
   CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
-  buildAndLaunchGraph(Nodes, stream, [&](size_t nodeId) {
+  // Launches one node's GeMM and SpMM on the stream.
+  auto launchNode = [&](size_t nodeId) {
     const Node &node = Nodes[nodeId];
     int numGemmRows = node.GemmEnd - node.GemmBegin;
     int numSpMMRows = node.SpMMRows.size();
@@ -224,7 +225,8 @@ std::vector<float> runGraphHandWritten(CudaTensorInputs *In,
           numSpMMRows, k, n, In->DACsrAp, In->DACsrI, In->DACsrVal, deviceD1,
           deviceD, deviceSpMMRows[nodeId]);
     }
-  });
+  };
+  buildAndLaunchGraph(Nodes, stream, launchNode);
 
   std::vector<float> hostD(n * k);
   CHECK(cudaMemcpy(hostD.data(), deviceD, hostD.size() * sizeof(float),
@@ -306,7 +308,8 @@ std::vector<float> runGraphLibraries(CudaTensorInputs *In, const float *DeviceC,
     CHECK(cudaMalloc(&deviceSpMMBuffer[nodeId], bufferBytes));
   }
 
-  buildAndLaunchGraph(Nodes, stream, [&](size_t nodeId) {
+  // Launches one node's GeMM and SpMM on the stream.
+  auto launchNode = [&](size_t nodeId) {
     const Node &node = Nodes[nodeId];
     int numGemmRows = node.GemmEnd - node.GemmBegin;
     if (numGemmRows > 0) {
@@ -323,7 +326,8 @@ std::vector<float> runGraphLibraries(CudaTensorInputs *In, const float *DeviceC,
                          CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT,
                          deviceSpMMBuffer[nodeId]));
     }
-  });
+  };
+  buildAndLaunchGraph(Nodes, stream, launchNode);
 
   std::vector<float> hostD(n * k);
   CHECK(cudaMemcpy(hostD.data(), deviceD, hostD.size() * sizeof(float),
