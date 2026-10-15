@@ -62,22 +62,19 @@ target_link_libraries(spmm_spmm_demo_gpu
         swbench::swbench
 )
 
-add_executable(gemm_spmm_graph_demo_gpu
-        demo/GeMMSpMMGraphDemo.cu
+add_executable(gemm_spmm_graph_example_gpu
+        demo/GeMMSpMMGraphExample.cu
 )
 
-# Adds native H100 code, so the SpMM kernel is not JIT-compiled from PTX while
-# the library kernels it is compared with are native.
-set_target_properties(gemm_spmm_graph_demo_gpu PROPERTIES CUDA_COMPILE_FLAGS "${CUDA_COMPILE_FLAGS}"
-        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES};90"
+set_target_properties(gemm_spmm_graph_example_gpu PROPERTIES CUDA_COMPILE_FLAGS "${CUDA_COMPILE_FLAGS}"
 )
 
-target_include_directories(gemm_spmm_graph_demo_gpu
+target_include_directories(gemm_spmm_graph_example_gpu
         PRIVATE
         ${SYM_AGG}/include
         ${SYM_FUS}/include
 )
-target_link_libraries(gemm_spmm_graph_demo_gpu
+target_link_libraries(gemm_spmm_graph_example_gpu
         cusparse
         cublas
         CUDA::cusparse

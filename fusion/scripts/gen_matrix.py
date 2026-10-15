@@ -31,15 +31,6 @@ def generate_banded_matrix_efficient(n, bandwidth):
                             shape=(n, n))
 
 
-def generate_block_diagonal_matrix(n, block_size):
-    rows, cols = [], []
-    for start in range(0, n, block_size):
-        block = range(start, min(start + block_size, n))
-        for i in block:
-            for j in block:
-                rows.append(i)
-                cols.append(j)
-    return sp.coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
 
 
 
