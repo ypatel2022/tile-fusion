@@ -112,6 +112,29 @@ std::vector<Node> buildSchedule(const CSR *A, int RowsPerTile) {
   return nodes;
 }
 
+// Prints each node's rows and the nodes it waits for, to check by hand.
+void printSchedule(const std::vector<Node> &Nodes) {
+  for (size_t nodeId = 0; nodeId < Nodes.size(); ++nodeId) {
+    const Node &node = Nodes[nodeId];
+    if (node.GemmEnd > node.GemmBegin) {
+      std::cout << "first-level node " << nodeId << ": GeMM rows "
+                << node.GemmBegin << "-" << node.GemmEnd - 1 << ", SpMM rows";
+    } else {
+      std::cout << "second-level node " << nodeId << ": SpMM rows";
+    }
+    for (int row : node.SpMMRows) {
+      std::cout << " " << row;
+    }
+    if (!node.DependsOn.empty()) {
+      std::cout << ", after nodes";
+      for (int tile : node.DependsOn) {
+        std::cout << " " << tile;
+      }
+    }
+    std::cout << "\n";
+  }
+}
+
 // Allocates Count floats on the GPU, filled with a large value, so an output
 // row no node writes, or an SpMM that runs before the GeMM it reads, cannot
 // match the reference.
@@ -377,25 +400,7 @@ int main(const int argc, const char *argv[]) {
   std::cout << tp._matrix_name << ": n = " << n
             << ", nnz = " << inputs->ACsr->nnz << ", k = " << k << ", "
             << rowsPerTile << " rows per tile\n";
-  for (size_t nodeId = 0; nodeId < nodes.size(); ++nodeId) {
-    const Node &node = nodes[nodeId];
-    if (node.GemmEnd > node.GemmBegin) {
-      std::cout << "first-level node " << nodeId << ": GeMM rows "
-                << node.GemmBegin << "-" << node.GemmEnd - 1 << ", SpMM rows";
-    } else {
-      std::cout << "second-level node " << nodeId << ": SpMM rows";
-    }
-    for (int row : node.SpMMRows) {
-      std::cout << " " << row;
-    }
-    if (!node.DependsOn.empty()) {
-      std::cout << ", after nodes";
-      for (int tile : node.DependsOn) {
-        std::cout << " " << tile;
-      }
-    }
-    std::cout << "\n";
-  }
+  printSchedule(nodes);
 
   bool correct = true;
   for (bool useLibraries : {false, true}) {
